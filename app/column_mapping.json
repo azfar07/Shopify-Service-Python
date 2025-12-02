@@ -1,0 +1,17 @@
+{
+  "default": {
+    "SKU": ["sku", "itemcode", "itemnumber", "productcode", "code"],
+    "TITLE": ["title", "productname", "name"],
+    "DESCRIPTION_HTML": ["description", "desc", "details"],
+    "VENDOR": ["vendor", "brand", "maker"],
+    "PRODUCT_TYPE": ["producttype", "category", "type"],
+    "STATUS": ["status"],
+    "PRICE": ["price", "retailprice", "cost"],
+    "QUANTITY": ["qty", "quantity", "stock", "inventory"]
+  },
+
+  "dorceree": {
+    "SKU": ["dorceree_sku"],
+    "PRICE": ["dorceree_price"]
+  }
+}
