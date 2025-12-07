@@ -1,8 +1,11 @@
 import os
 from typing import Dict, Any, Optional, List
 
+import logging
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger("drive_shopify_sync")
 
 # ---------------------------------------------------------
 # Load environment variables (.env)
@@ -30,6 +33,17 @@ def _safe_str(value: Any, default: str = "") -> str:
     return text
 
 
+def _parse_image_urls(row: Dict[str, Any]) -> List[str]:
+    """
+    Expecting scraped images in row["IMAGES"] as comma-separated URLs.
+    """
+    raw = _safe_str(row.get("IMAGES"))
+    if not raw:
+        return []
+    parts = [p.strip() for p in raw.split(",")]
+    return [p for p in parts if p]
+
+
 # =========================================================
 #  SKU LOOKUP
 # =========================================================
@@ -40,12 +54,14 @@ def find_product_by_sku(sku: str) -> Optional[Dict[str, Any]]:
       - product JSON if found
       - None if not found
     """
+    logger.info(f"Looking up product by SKU '{sku}'")
+
     url = f"{BASE_URL}/products.json?limit=250&fields=id,title,variants,body_html,vendor,product_type,status"
 
     resp = requests.get(
         url,
         headers={"X-Shopify-Access-Token": SHOPIFY_TOKEN},
-        timeout=30
+        timeout=30,
     )
     resp.raise_for_status()
 
@@ -54,8 +70,10 @@ def find_product_by_sku(sku: str) -> Optional[Dict[str, Any]]:
     for product in data:
         for variant in product.get("variants", []):
             if variant.get("sku", "").strip().lower() == sku.lower():
+                logger.info(f"Found existing product id={product['id']} for SKU={sku}")
                 return product
 
+    logger.info(f"No existing product found for SKU={sku}")
     return None
 
 
@@ -73,13 +91,15 @@ def build_product_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     price = _safe_str(row.get("PRICE"))
     quantity = _safe_str(row.get("QUANTITY"))
 
-    return {
+    image_urls = _parse_image_urls(row)
+
+    payload: Dict[str, Any] = {
         "product": {
             "title": title,
             "body_html": description,
             "vendor": vendor,
             "product_type": product_type,
-            "status": status,
+            "status": status or "draft",
             "variants": [
                 {
                     "sku": sku,
@@ -94,6 +114,12 @@ def build_product_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         }
     }
 
+    if image_urls:
+        # let Shopify fetch & store them
+        payload["product"]["images"] = [{"src": url} for url in image_urls]
+
+    return payload
+
 
 # =========================================================
 #  CREATE PRODUCT
@@ -105,9 +131,13 @@ def create_product(payload: Dict[str, Any]) -> Dict[str, Any]:
         "Content-Type": "application/json",
     }
 
+    logger.info(f"Creating new product: {payload['product'].get('title')}")
     resp = requests.post(url, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+
+    data = resp.json()
+    logger.info(f"Created product id={data['product']['id']}")
+    return data
 
 
 # =========================================================
@@ -123,10 +153,49 @@ def update_existing_product(product_id: int, payload: Dict[str, Any]) -> Dict[st
         "Content-Type": "application/json",
     }
 
-    # Shopify expects:
-    # { "product": { "id": 123, ...updated fields... } }
     payload["product"]["id"] = product_id
 
+    logger.info(f"Updating existing product id={product_id}")
     resp = requests.put(url, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    logger.info(f"Updated product id={product_id}")
+    return data
+
+
+# =========================================================
+#  ADD IMAGES TO EXISTING PRODUCT (OPTIONAL EXTRA STEP)
+# =========================================================
+def add_images_to_product(
+    product_id: int,
+    image_urls: List[str],
+    variant_id: Optional[int] = None,
+) -> None:
+    """
+    Upload/Add images to an existing product.
+    If variant_id is provided, associate image to that variant.
+    """
+    if not image_urls:
+        return
+
+    headers = {
+        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "Content-Type": "application/json",
+    }
+
+    for url in image_urls:
+        body: Dict[str, Any] = {"image": {"src": url}}
+        if variant_id:
+            body["image"]["variant_ids"] = [variant_id]
+
+        logger.info(
+            f"Adding image to product id={product_id}, "
+            f"variant_id={variant_id}, src={url}"
+        )
+        resp = requests.post(
+            f"{BASE_URL}/products/{product_id}/images.json",
+            json=body,
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
