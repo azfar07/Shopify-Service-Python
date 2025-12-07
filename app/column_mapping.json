@@ -7,7 +7,9 @@
     "PRODUCT_TYPE": ["producttype", "category", "type"],
     "STATUS": ["status"],
     "PRICE": ["price", "retailprice", "cost"],
-    "QUANTITY": ["qty", "quantity", "stock", "inventory"]
+    "QUANTITY": ["qty", "quantity", "stock", "inventory"],
+        "WEBSITE": ["website", "url", "baseurl", "domain"]
+
   },
 
   "dorceree": {
